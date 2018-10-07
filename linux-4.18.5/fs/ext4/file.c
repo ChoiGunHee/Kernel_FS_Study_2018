@@ -480,25 +480,54 @@ static int ext4_file_open(struct inode * inode, struct file * filp)
  * by calling generic_file_llseek_size() with the appropriate maxbytes
  * value for each.
  */
+/* 
+* extent-mapped: - 연속 할당시 사용
+				 - 선 할당으로 할당된 block 들이 충분하지 않을 때 또 다른 연속된 공간을 extent 단위로 할당.
+*/
 loff_t ext4_llseek(struct file *file, loff_t offset, int whence)
 {
+	/* 변수
+	* inode를 통해 파일과 매핑되는 파일을 찾음
+	* 최대 파일 크기 저장한 변수 선언
+	*/
 	struct inode *inode = file->f_mapping->host;
 	loff_t maxbytes;
 
+	/* ext4_test_inode_flag
+	* extent mapping을 사용하지 않을 때
+	*/
 	if (!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)))
 		maxbytes = EXT4_SB(inode->i_sb)->s_bitmap_maxbytes;
+
+	/*
+	* extent mapping을 사용할 때
+	*/
 	else
 		maxbytes = inode->i_sb->s_maxbytes;
 
 	switch (whence) {
+	/* generic_file_llseek_size
+	* 함수 내에 SEEK_END, SEEK_CUR, SEEK_DATA, SEEK_HOLE이 정의
+	*/
 	default:
 		return generic_file_llseek_size(file, offset, whence,
 						maxbytes, i_size_read(inode));
+
+	/*
+	* SEEK_HOLE: hole은 파일 맨 끝에 위치
+	* 따라서 offset이 eof(end of file)보다 클 경우 'no such device or address' 리턴
+	* hole이 최적화 시켜줌
+	*/
 	case SEEK_HOLE:
 		inode_lock_shared(inode);
 		offset = iomap_seek_hole(inode, offset, &ext4_iomap_ops);
 		inode_unlock_shared(inode);
 		break;
+
+	/* SEEK_DATA
+	* generic case 에서는 모든 file이 data이기 때문에
+	* offset이 eof만 넘지 않ㄴ느다면 offset은 data이다.
+	*/
 	case SEEK_DATA:
 		inode_lock_shared(inode);
 		offset = iomap_seek_data(inode, offset, &ext4_iomap_ops);
